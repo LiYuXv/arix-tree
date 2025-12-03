@@ -35,10 +35,8 @@ export const Snowfall = ({ count = 500, area = 50, speed = 1 }: SnowfallProps) =
 
   const tempObj = new THREE.Object3D();
 
-  useFrame((state) => {
+  useFrame(() => {
     if (!meshRef.current) return;
-
-    const time = state.clock.elapsedTime;
 
     snowflakes.forEach((flake, i) => {
       // 更新位置
