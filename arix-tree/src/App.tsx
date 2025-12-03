@@ -5,6 +5,7 @@ import { Environment, OrbitControls, ContactShadows } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { Foliage } from './Foliage';
 import { Ornaments } from './Ornaments';
+import { Snowfall } from './Snowfall';
 
 const ArixChristmasTree = () => {
   const [isTreeShape, setIsTreeShape] = useState(false);
@@ -40,22 +41,25 @@ const ArixChristmasTree = () => {
             <Foliage isTreeShape={isTreeShape} />
 
             {/* 2. 礼物盒 (重型装饰 - 深红/金) */}
-            <Ornaments 
-              isTreeShape={isTreeShape} 
-              type="box" 
-              count={100} 
-              color="#8B0000" 
-              scaleBase={0.8} 
+            <Ornaments
+              isTreeShape={isTreeShape}
+              type="box"
+              count={100}
+              color="#8B0000"
+              scaleBase={0.8}
             />
 
             {/* 3. 金球 (轻型装饰 - 纯金) */}
-            <Ornaments 
-              isTreeShape={isTreeShape} 
-              type="sphere" 
-              count={200} 
-              color="#F9E4B7" 
-              scaleBase={0.5} 
+            <Ornaments
+              isTreeShape={isTreeShape}
+              type="sphere"
+              count={200}
+              color="#F9E4B7"
+              scaleBase={0.5}
             />
+
+            {/* 4. 雪花飘落效果 */}
+            <Snowfall count={600} area={60} speed={1.2} />
           </Suspense>
         </group>
 

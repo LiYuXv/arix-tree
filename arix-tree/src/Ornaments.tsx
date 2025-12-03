@@ -57,29 +57,29 @@ const GiftCard = ({ position, onClose, photoSrc }: { position: THREE.Vector3, on
           height: '100vh',
           display: 'flex',            // 核心：弹性布局
           flexDirection: 'column',    // 垂直排列
-          justifyContent: 'center',   // 垂直居中
+          justifyContent: 'flex-start',   // 顶部对齐
           alignItems: 'center',       // 水平居中
-          background: 'rgba(0, 0, 0, 0.6)', // 半透明黑色背景遮罩
-          backdropFilter: 'blur(5px)',      // 背景模糊高级感
+          paddingTop: '10vh',         // 顶部留白，让图片往上
+          background: 'transparent',  // 完全透明背景
           transition: 'all 0.3s ease'
         }}>
           {/* 照片容器 */}
           <div style={{
             position: 'relative',
-            padding: '10px',
-            background: 'rgba(255, 255, 255, 0.1)',
+            padding: '8px',
+            background: 'rgba(0, 5, 0, 0.9)',
             border: '1px solid #D4AF37',
-            boxShadow: '0 0 30px rgba(212, 175, 55, 0.3)',
+            borderRadius: '4px',
             animation: 'fadeIn 0.5s ease' // 简单的淡入动画
           }}>
             <img
               src={photoSrc}
               alt="Christmas Gift"
-              style={{ 
-                maxWidth: '80vw',      // 限制最大宽度，防止手机上爆屏
-                maxHeight: '60vh',     // 限制最大高度
+              style={{
+                maxWidth: '50vw',      // 缩小最大宽度
+                maxHeight: '45vh',     // 缩小最大高度
                 display: 'block',
-                border: '1px solid rgba(212, 175, 55, 0.5)'
+                borderRadius: '2px'
               }}
             />
 
@@ -121,13 +121,43 @@ const GiftCard = ({ position, onClose, photoSrc }: { position: THREE.Vector3, on
 
 type OrnamentProps = { isTreeShape: boolean; type: 'box' | 'sphere'; count: number; color: string; scaleBase: number; };
 
+// 创建礼物盒材质 - 使用普通材质，深红色带金属光泽
+const createGiftBoxMaterial = () => {
+  return new THREE.MeshStandardMaterial({
+    color: '#8B0000',
+    roughness: 0.2,
+    metalness: 0.7,
+    envMapIntensity: 1.2
+  });
+};
+
+// 创建普通方块材质 - 稍微不同的颜色
+const createBoxMaterial = (color: string) => {
+  return new THREE.MeshStandardMaterial({
+    color: color,
+    roughness: 0.15,
+    metalness: 0.9,
+    envMapIntensity: 1.5
+  });
+};
+
+// 礼物盒比例 (0.4 = 40% 礼物盒, 60% 普通方块)
+const GIFT_BOX_RATIO = 0.4;
+
 // 下面的代码与之前保持一致，没有任何逻辑变化
 export const Ornaments = ({ isTreeShape, type, count, color, scaleBase }: OrnamentProps) => {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const giftMeshRef = useRef<THREE.InstancedMesh>(null);
+  const boxMeshRef = useRef<THREE.InstancedMesh>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [clickedPos, setClickedPos] = useState<THREE.Vector3 | null>(null);
   const [activePhoto, setActivePhoto] = useState<string>('');
 
+  // 为礼物盒和普通方块创建材质
+  const giftMaterial = useMemo(() => createGiftBoxMaterial(), []);
+  const boxMaterial = useMemo(() => createBoxMaterial(color), [color]);
+  const sphereMaterial = useMemo(() => createBoxMaterial(color), [color]);
+
+  // 生成数据时标记每个是礼物盒还是普通方块
   const data = useMemo(() => {
     return new Array(count).fill(0).map(() => ({
       scatterPos: getSpherePosition(35),
@@ -135,9 +165,24 @@ export const Ornaments = ({ isTreeShape, type, count, color, scaleBase }: Orname
       scale: Math.random() * 0.5 + 0.5,
       rotationSpeed: (Math.random() - 0.5) * 2,
       phase: Math.random() * Math.PI * 2,
-      photo: PHOTOS[Math.floor(Math.random() * PHOTOS.length)]
+      photo: PHOTOS[Math.floor(Math.random() * PHOTOS.length)],
+      isGiftBox: Math.random() < GIFT_BOX_RATIO // 随机决定是否为礼物盒
     }));
   }, [count]);
+
+  // 分离礼物盒和普通方块的索引
+  const { giftIndices, boxIndices } = useMemo(() => {
+    const gifts: number[] = [];
+    const boxes: number[] = [];
+    data.forEach((d, i) => {
+      if (d.isGiftBox) {
+        gifts.push(i);
+      } else {
+        boxes.push(i);
+      }
+    });
+    return { giftIndices: gifts, boxIndices: boxes };
+  }, [data]);
 
   const tempObj = new THREE.Object3D();
   const progress = useRef(0);
@@ -145,39 +190,117 @@ export const Ornaments = ({ isTreeShape, type, count, color, scaleBase }: Orname
   useFrame((state, delta) => {
     const target = isTreeShape ? 1 : 0;
     progress.current = THREE.MathUtils.lerp(progress.current, target, delta * 2);
-    data.forEach((d, i) => {
-      const currentPos = new THREE.Vector3().lerpVectors(d.scatterPos, d.treePos, progress.current);
-      const floatAmp = THREE.MathUtils.lerp(2.0, 0.2, progress.current);
-      currentPos.y += Math.sin(state.clock.elapsedTime + d.phase) * floatAmp * 0.1;
-      
-      tempObj.position.copy(currentPos);
-      tempObj.rotation.set(state.clock.elapsedTime * d.rotationSpeed * 0.2, state.clock.elapsedTime * d.rotationSpeed * 0.2, 0);
-      
-      const finalScale = (i === activeId) ? 0 : d.scale * scaleBase;
-      tempObj.scale.setScalar(finalScale);
-      tempObj.updateMatrix();
-      meshRef.current!.setMatrixAt(i, tempObj.matrix);
-    });
-    meshRef.current!.instanceMatrix.needsUpdate = true;
+
+    // 更新礼物盒
+    if (type === 'box' && giftMeshRef.current && giftIndices.length > 0) {
+      giftIndices.forEach((dataIdx, meshIdx) => {
+        const d = data[dataIdx];
+        const currentPos = new THREE.Vector3().lerpVectors(d.scatterPos, d.treePos, progress.current);
+        const floatAmp = THREE.MathUtils.lerp(2.0, 0.2, progress.current);
+        currentPos.y += Math.sin(state.clock.elapsedTime + d.phase) * floatAmp * 0.1;
+
+        tempObj.position.copy(currentPos);
+        tempObj.rotation.set(state.clock.elapsedTime * d.rotationSpeed * 0.2, state.clock.elapsedTime * d.rotationSpeed * 0.2, 0);
+
+        const finalScale = (dataIdx === activeId) ? 0 : d.scale * scaleBase;
+        tempObj.scale.setScalar(finalScale);
+        tempObj.updateMatrix();
+        giftMeshRef.current!.setMatrixAt(meshIdx, tempObj.matrix);
+      });
+      giftMeshRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // 更新普通方块
+    if (type === 'box' && boxMeshRef.current && boxIndices.length > 0) {
+      boxIndices.forEach((dataIdx, meshIdx) => {
+        const d = data[dataIdx];
+        const currentPos = new THREE.Vector3().lerpVectors(d.scatterPos, d.treePos, progress.current);
+        const floatAmp = THREE.MathUtils.lerp(2.0, 0.2, progress.current);
+        currentPos.y += Math.sin(state.clock.elapsedTime + d.phase) * floatAmp * 0.1;
+
+        tempObj.position.copy(currentPos);
+        tempObj.rotation.set(state.clock.elapsedTime * d.rotationSpeed * 0.2, state.clock.elapsedTime * d.rotationSpeed * 0.2, 0);
+
+        const finalScale = (dataIdx === activeId) ? 0 : d.scale * scaleBase;
+        tempObj.scale.setScalar(finalScale);
+        tempObj.updateMatrix();
+        boxMeshRef.current!.setMatrixAt(meshIdx, tempObj.matrix);
+      });
+      boxMeshRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // 更新球体 (非 box 类型)
+    if (type !== 'box' && giftMeshRef.current) {
+      data.forEach((d, i) => {
+        const currentPos = new THREE.Vector3().lerpVectors(d.scatterPos, d.treePos, progress.current);
+        const floatAmp = THREE.MathUtils.lerp(2.0, 0.2, progress.current);
+        currentPos.y += Math.sin(state.clock.elapsedTime + d.phase) * floatAmp * 0.1;
+
+        tempObj.position.copy(currentPos);
+        tempObj.rotation.set(state.clock.elapsedTime * d.rotationSpeed * 0.2, state.clock.elapsedTime * d.rotationSpeed * 0.2, 0);
+
+        const finalScale = d.scale * scaleBase;
+        tempObj.scale.setScalar(finalScale);
+        tempObj.updateMatrix();
+        giftMeshRef.current!.setMatrixAt(i, tempObj.matrix);
+      });
+      giftMeshRef.current.instanceMatrix.needsUpdate = true;
+    }
   });
 
-  const handleClick = (e: any) => {
+  const handleGiftClick = (e: any) => {
     if (type !== 'box') return;
     e.stopPropagation();
-    const instanceId = e.instanceId;
+    const meshIdx = e.instanceId;
+    const dataIdx = giftIndices[meshIdx];
     const matrix = new THREE.Matrix4();
-    meshRef.current!.getMatrixAt(instanceId, matrix);
-    setActiveId(instanceId);
+    giftMeshRef.current!.getMatrixAt(meshIdx, matrix);
+    setActiveId(dataIdx);
     setClickedPos(new THREE.Vector3().setFromMatrixPosition(matrix));
-    setActivePhoto(data[instanceId].photo);
+    setActivePhoto(data[dataIdx].photo);
   };
 
+  const handleBoxClick = (e: any) => {
+    if (type !== 'box') return;
+    e.stopPropagation();
+    const meshIdx = e.instanceId;
+    const dataIdx = boxIndices[meshIdx];
+    const matrix = new THREE.Matrix4();
+    boxMeshRef.current!.getMatrixAt(meshIdx, matrix);
+    setActiveId(dataIdx);
+    setClickedPos(new THREE.Vector3().setFromMatrixPosition(matrix));
+    setActivePhoto(data[dataIdx].photo);
+  };
+
+  // 球体类型渲染
+  if (type !== 'box') {
+    return (
+      <instancedMesh ref={giftMeshRef} args={[undefined, undefined, count]}>
+        <sphereGeometry args={[1, 32, 32]} />
+        <primitive object={sphereMaterial} attach="material" />
+      </instancedMesh>
+    );
+  }
+
+  // 方块类型渲染 - 分开渲染礼物盒和普通方块
   return (
     <>
-      <instancedMesh ref={meshRef} args={[undefined, undefined, count]} onClick={handleClick}>
-        {type === 'box' ? <boxGeometry args={[1, 1, 1]} /> : <sphereGeometry args={[1, 32, 32]} />}
-        <meshStandardMaterial color={color} roughness={0.15} metalness={0.9} envMapIntensity={1.5} />
-      </instancedMesh>
+      {/* 礼物盒 */}
+      {giftIndices.length > 0 && (
+        <instancedMesh ref={giftMeshRef} args={[undefined, undefined, giftIndices.length]} onClick={handleGiftClick}>
+          <boxGeometry args={[1, 1, 1]} />
+          <primitive object={giftMaterial} attach="material" />
+        </instancedMesh>
+      )}
+
+      {/* 普通红色方块 */}
+      {boxIndices.length > 0 && (
+        <instancedMesh ref={boxMeshRef} args={[undefined, undefined, boxIndices.length]} onClick={handleBoxClick}>
+          <boxGeometry args={[1, 1, 1]} />
+          <primitive object={boxMaterial} attach="material" />
+        </instancedMesh>
+      )}
+
       {activeId !== null && clickedPos && (
         <GiftCard position={clickedPos} photoSrc={activePhoto} onClose={() => { setActiveId(null); setClickedPos(null); setActivePhoto(''); }} />
       )}
