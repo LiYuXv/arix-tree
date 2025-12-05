@@ -1,7 +1,7 @@
 [build]
   base = "arix-tree"
   command = "npm run build"
-  publish = "arix-tree/dist"
+  publish = "dist"
 
 [[redirects]]
   from = "/*"
