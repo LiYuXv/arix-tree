@@ -1,122 +1,383 @@
-// App.tsx
-import { useState, Suspense } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { Environment, OrbitControls, ContactShadows } from '@react-three/drei';
+import React, { useState, Suspense, useRef, useCallback } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrbitControls, ContactShadows, Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
-import { Foliage } from './Foliage';
-import { Ornaments } from './Ornaments';
-import { Snowfall } from './Snowfall';
+import * as THREE from 'three';
+
+import { Foliage } from './components/Foliage';
+import { Ornaments } from './components/Ornaments';
+import type { OrnamentsHandle } from './components/Ornaments';
+import { Snowfall } from './components/Snowfall';
+import { GestureDetector } from './components/GestureDetector';
+import { TreeStar } from './components/TreeStar';
+import { MusicPlayer } from './components/MusicPlayer';
+import { SpiralParticles } from './components/SpiralParticles'; // Import the new component
+import { MEMORIES, Memory } from './utils';
+
+// 🌳 旋转控制组件
+const RotatableGroup = ({ 
+  rotationY, 
+  children 
+}: { 
+  rotationY: number, 
+  children: React.ReactNode 
+}) => {
+  const groupRef = useRef<THREE.Group>(null);
+  
+  useFrame(() => {
+    if (groupRef.current) {
+      groupRef.current.rotation.y = THREE.MathUtils.lerp(
+        groupRef.current.rotation.y,
+        rotationY,
+        0.1
+      );
+    }
+  });
+
+  return <group ref={groupRef} position={[0, -5, 0]}>{children}</group>;
+};
+
+// 📝 Memory Management Modal (Combined Add & Delete)
+const MemoryManagerModal = ({ 
+  isOpen, 
+  onClose, 
+  memories,
+  onAdd,
+  onDelete
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  memories: Memory[];
+  onAdd: (memory: Memory) => void;
+  onDelete: (id: number | string) => void;
+}) => {
+  const [name, setName] = useState('');
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [music, setMusic] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [view, setView] = useState<'list' | 'add'>('list');
+
+  if (!isOpen) return null;
+
+  const handleFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name || !photo) {
+        alert("Name and Photo are required!");
+        return;
+    }
+    
+    setLoading(true);
+    try {
+      const photoUrl = await handleFile(photo);
+      let musicUrl = '';
+      if (music) {
+        musicUrl = await handleFile(music);
+      }
+
+      const newMemory: Memory = {
+        id: Date.now(),
+        name,
+        photo: photoUrl,
+        music: musicUrl
+      };
+      
+      onAdd(newMemory);
+      
+      // Reset
+      setName('');
+      setPhoto(null);
+      setMusic(null);
+      setView('list'); // Go back to list after adding
+    } catch (err) {
+      console.error(err);
+      alert("Failed to process files.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md">
+      <div className="bg-[#111] border border-[#D4AF37] p-6 rounded-lg w-[95%] max-w-2xl shadow-[0_0_50px_rgba(212,175,55,0.3)] text-[#D4AF37] max-h-[90vh] flex flex-col">
+        <div className="flex justify-between items-center mb-6 border-b border-[#333] pb-4">
+           <h2 className="text-2xl font-serif">Manage Memories</h2>
+           <button onClick={onClose} className="text-[#666] hover:text-white">✕</button>
+        </div>
+        
+        {/* Toggle Views */}
+        <div className="flex gap-4 mb-6">
+            <button 
+              onClick={() => setView('list')}
+              className={`px-4 py-2 rounded transition-all font-serif ${view === 'list' ? 'bg-[#D4AF37] text-black font-bold' : 'border border-[#444] text-[#888]'}`}
+            >
+              My Memories ({memories.length})
+            </button>
+            <button 
+              onClick={() => setView('add')}
+              className={`px-4 py-2 rounded transition-all font-serif ${view === 'add' ? 'bg-[#D4AF37] text-black font-bold' : 'border border-[#444] text-[#888]'}`}
+            >
+              + Add New
+            </button>
+        </div>
+
+        {/* LIST VIEW */}
+        {view === 'list' && (
+          <div className="flex-1 overflow-y-auto min-h-[300px] pr-2 custom-scrollbar">
+            {memories.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-[#444]">
+                    <p className="text-xl italic">No memories yet.</p>
+                    <p className="text-sm mt-2">Switch to "Add New" to create one.</p>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {memories.map(m => (
+                        <div key={m.id} className="flex gap-3 p-3 bg-[#1a1a1a] border border-[#333] rounded hover:border-[#D4AF37] transition-colors group">
+                            <img src={m.photo} className="w-16 h-16 object-cover rounded bg-black" />
+                            <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                <h4 className="font-bold text-[#eee] truncate">{m.name}</h4>
+                                <span className="text-xs text-[#666]">{m.music ? '🎵 Music Attached' : 'No Music'}</span>
+                            </div>
+                            <button 
+                                onClick={() => onDelete(m.id)}
+                                className="self-center p-2 text-[#666] hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                                title="Delete"
+                            >
+                                🗑️
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
+          </div>
+        )}
+
+        {/* ADD VIEW */}
+        {view === 'add' && (
+           <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-y-auto">
+            <div>
+                <label className="block text-sm mb-1 opacity-80">Memory Name</label>
+                <input 
+                type="text" 
+                value={name} 
+                onChange={(e) => setName(e.target.value)}
+                className="w-full bg-black/50 border border-[#444] rounded p-3 text-white focus:border-[#D4AF37] outline-none transition-colors"
+                placeholder="e.g. Christmas 2023"
+                />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+                <div>
+                    <label className="block text-sm mb-1 opacity-80">Photo</label>
+                    <div className="relative border border-[#444] rounded p-4 hover:border-[#D4AF37] transition-colors border-dashed text-center">
+                        <input 
+                        type="file" 
+                        accept="image/*"
+                        onChange={(e) => setPhoto(e.target.files?.[0] || null)}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        />
+                        <span className="text-sm text-[#888]">{photo ? photo.name : 'Click to Upload Image'}</span>
+                    </div>
+                </div>
+
+                <div>
+                    <label className="block text-sm mb-1 opacity-80">Music (Optional)</label>
+                    <div className="relative border border-[#444] rounded p-4 hover:border-[#D4AF37] transition-colors border-dashed text-center">
+                        <input 
+                        type="file" 
+                        accept="audio/*"
+                        onChange={(e) => setMusic(e.target.files?.[0] || null)}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        />
+                         <span className="text-sm text-[#888]">{music ? music.name : 'Click to Upload Audio'}</span>
+                    </div>
+                </div>
+            </div>
+
+            <button 
+                type="submit" 
+                disabled={loading}
+                className="mt-4 py-3 bg-[#D4AF37] text-black font-bold rounded hover:bg-[#b5952f] transition-colors disabled:opacity-50 font-serif tracking-wide"
+            >
+                {loading ? 'Processing...' : 'Create Memory'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const ArixChristmasTree = () => {
   const [isTreeShape, setIsTreeShape] = useState(false);
+  const [activeMusic, setActiveMusic] = useState<{ url: string, name: string } | null>(null);
+  
+  // 🌟 Memory State
+  const [memories, setMemories] = useState<Memory[]>(MEMORIES);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // 🎮 手势状态
+  const [targetRotation, setTargetRotation] = useState(0);
+  const ornamentsRef = useRef<OrnamentsHandle>(null);
+
+  // 防抖控制
+  const lastGestureTime = useRef(0);
+  const lastPinchTime = useRef(0);
+  const wasPinching = useRef(false);
+
+  const handleGestureFrame = useCallback((data: { gesture: string, rotation: number, isPinching: boolean }) => {
+    const now = Date.now();
+
+    if (!isTreeShape) {
+       setTargetRotation(data.rotation);
+    }
+
+    if (now - lastGestureTime.current >= 1000) {
+      if (data.gesture === 'Closed_Fist') {
+        setIsTreeShape(true);
+        lastGestureTime.current = now;
+      } else if (data.gesture === 'Open_Palm') {
+        if (ornamentsRef.current?.hasActiveGift()) {
+          ornamentsRef.current.closeActive();
+        } else {
+          setIsTreeShape(false);
+        }
+        lastGestureTime.current = now;
+      }
+    }
+
+    const isPinchingNow = data.isPinching;
+    const canPinch = !isTreeShape && !ornamentsRef.current?.hasActiveGift();
+
+    if (isPinchingNow && !wasPinching.current && canPinch && (now - lastPinchTime.current >= 500)) {
+      ornamentsRef.current?.openNearest();
+      lastPinchTime.current = now;
+    }
+
+    wasPinching.current = isPinchingNow;
+
+  }, [isTreeShape]);
+
+  const handleInteract = (memory: { music: string, name: string } | null) => {
+    if (memory) {
+      setActiveMusic({ url: memory.music, name: memory.name });
+    } else {
+      setActiveMusic(null);
+    }
+  };
+
+  const handleAddMemory = (newMemory: Memory) => {
+    setMemories([newMemory, ...memories]);
+  };
+
+  const handleDeleteMemory = (id: number | string) => {
+    setMemories(memories.filter(m => m.id !== id));
+  };
 
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#000500' }}>
+    <div className="w-screen h-screen bg-[#000500] relative overflow-hidden">
       <Canvas
         camera={{ position: [0, 4, 25], fov: 45 }}
-        gl={{ antialias: false, toneMappingExposure: 0.8 }} // 曝光控制
-        dpr={[1, 2]} // 适配高分屏
+        gl={{ antialias: false, toneMappingExposure: 1.2 }}
+        dpr={[1, 2]}
       >
-        {/* --- 环境与光照 --- */}
         <color attach="background" args={['#000500']} />
-        {/* 使用 City 或 Lobby 预设来获得复杂的窗户/灯光反射 */}
-        <Environment preset="city" /> 
+        {/* Improved Lighting for Better Rendering */}
+        <ambientLight intensity={2.0} color="#fff0d0" /> {/* Warmer ambient */}
+        <Stars radius={100} depth={50} count={5000} factor={4} saturation={1} fade speed={0.5} />
         
-        <ambientLight intensity={0.2} color="#002419" />
-        <pointLight position={[0, 15, 0]} intensity={100} distance={20} color="#ffebcd" />
-        <spotLight 
-          position={[10, 20, 10]} 
-          angle={0.3} 
-          penumbra={1} 
-          intensity={200} 
-          color="#ffd700" 
-          castShadow 
-        />
-        <pointLight position={[-10, 5, -10]} intensity={50} color="#00ff88" />
+        <hemisphereLight args={['#ffeeb1', '#080820', 3.0]} />
+        <pointLight position={[0, 15, 0]} intensity={500} distance={50} color="#ffebcd" />
+        <spotLight position={[10, 20, 10]} angle={0.5} penumbra={1} intensity={800} color="#ffd700" castShadow />
+        <pointLight position={[-10, 5, -10]} intensity={300} color="#44ffaa" />
 
-        {/* --- 场景内容 --- */}
-        <group position={[0, -5, 0]}>
+        <RotatableGroup rotationY={targetRotation}>
           <Suspense fallback={null}>
-            {/* 1. 针叶层 (大量的点) */}
             <Foliage isTreeShape={isTreeShape} />
-
-            {/* 2. 礼物盒 (重型装饰 - 深红/金) */}
+            <TreeStar isTreeShape={isTreeShape} />
+            <SpiralParticles isTreeShape={isTreeShape} />
+            
             <Ornaments
+              ref={ornamentsRef}
               isTreeShape={isTreeShape}
               type="box"
               count={100}
               color="#8B0000"
               scaleBase={0.8}
+              memories={memories}
+              onInteract={handleInteract}
             />
 
-            {/* 3. 金球 (轻型装饰 - 纯金) */}
             <Ornaments
               isTreeShape={isTreeShape}
               type="sphere"
               count={200}
-              color="#F9E4B7"
+              color="#FFF5E1" // Brighter, warm white/gold
               scaleBase={0.5}
             />
 
-            {/* 4. 雪花飘落效果 */}
             <Snowfall count={600} area={60} speed={1.2} />
           </Suspense>
-        </group>
+        </RotatableGroup>
 
-        {/* --- 底部阴影 --- */}
-        <ContactShadows opacity={0.5} scale={40} blur={2} far={10} color="#000000" />
-
-        {/* --- 后期特效 (关键的奢华感来源) --- */}
-        <EffectComposer enableNormalPass={false}>
-          <Bloom
-            luminanceThreshold={0.9}
-            mipmapBlur
-            intensity={1.3}
-            radius={0.6}
-          />
+        <ContactShadows opacity={0.6} scale={40} blur={2.5} far={10} color="#000000" />
+        <EffectComposer enableNormalPass>
+          {/* Stronger bloom for that magical glowing feel */}
+          <Bloom luminanceThreshold={0.7} mipmapBlur intensity={1.8} radius={0.5} />
         </EffectComposer>
-
-        <OrbitControls 
-          enablePan={false} 
-          minPolarAngle={Math.PI / 4} 
-          maxPolarAngle={Math.PI / 1.8} 
-          autoRotate={isTreeShape} // 成树后自动旋转展示
+        
+        <OrbitControls
+          enablePan={false}
+          minPolarAngle={Math.PI / 4}
+          maxPolarAngle={Math.PI / 1.8}
+          autoRotate={isTreeShape}
           autoRotateSpeed={0.5}
         />
       </Canvas>
 
-      {/* --- UI 交互层 --- */}
-      <div style={{
-        position: 'absolute', bottom: '50px', left: '50%', transform: 'translateX(-50%)',
-        zIndex: 10, textAlign: 'center'
-      }}>
+      <GestureDetector onGestureFrame={handleGestureFrame} />
+
+      <MusicPlayer 
+        musicUrl={activeMusic?.url || null} 
+        isPlaying={!!activeMusic}
+      />
+
+      {/* Main UI Controls */}
+      <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-10 flex gap-4">
         <button
           onClick={() => setIsTreeShape(!isTreeShape)}
-          style={{
-            background: 'transparent',
-            border: '1px solid #D4AF37',
-            color: '#D4AF37',
-            padding: '12px 32px',
-            fontSize: '1rem',
-            fontFamily: 'Times New Roman, serif', // 衬线字体增加高级感
-            letterSpacing: '2px',
-            cursor: 'pointer',
-            textTransform: 'uppercase',
-            transition: 'all 0.3s ease',
-            backdropFilter: 'blur(5px)'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = '#D4AF37';
-            e.currentTarget.style.color = '#000';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = '#D4AF37';
-          }}
+          className="bg-transparent border-2 border-[#D4AF37] text-[#D4AF37] px-8 py-3 text-base tracking-[2px] cursor-pointer uppercase transition-all duration-300 backdrop-blur-sm rounded-lg font-bold hover:bg-[#D4AF37] hover:text-black font-serif shadow-[0_0_15px_rgba(212,175,55,0.4)]"
         >
-          {isTreeShape ? "Scatter Elements" : "Summon The Arix Tree"}
+          {isTreeShape ? "Scatter" : "Summon Tree"}
         </button>
       </div>
+
+      {/* Manage Memories Button */}
+      <div className="absolute top-6 left-6 z-20">
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="flex items-center justify-center bg-[#D4AF37]/20 border border-[#D4AF37] text-[#D4AF37] p-3 rounded-full cursor-pointer hover:bg-[#D4AF37] hover:text-black transition-all font-serif backdrop-blur-md shadow-[0_0_10px_rgba(212,175,55,0.3)]"
+          title="Manage Memories"
+        >
+          <span className="text-xl leading-none">⚙</span>
+        </button>
+      </div>
+
+      <MemoryManagerModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        memories={memories}
+        onAdd={handleAddMemory}
+        onDelete={handleDeleteMemory}
+      />
     </div>
   );
 };
