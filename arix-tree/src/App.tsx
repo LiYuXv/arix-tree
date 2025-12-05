@@ -37,25 +37,28 @@ const RotatableGroup = ({
   return <group ref={groupRef} position={[0, -5, 0]}>{children}</group>;
 };
 
-// 📝 Memory Management Modal (Combined Add & Delete)
+// 📝 Memory Management Modal (Combined Add & Delete & Backup)
 const MemoryManagerModal = ({ 
   isOpen, 
   onClose, 
   memories,
   onAdd,
-  onDelete
+  onDelete,
+  onImport
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
   memories: Memory[];
   onAdd: (memory: Memory) => void;
   onDelete: (id: number | string) => void;
+  onImport: (memories: Memory[]) => void;
 }) => {
   const [name, setName] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
   const [music, setMusic] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<'list' | 'add'>('list');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -103,6 +106,49 @@ const MemoryManagerModal = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleExport = () => {
+    const dataStr = JSON.stringify(memories, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `arix_memories_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = event.target?.result as string;
+        const parsed = JSON.parse(json);
+        if (Array.isArray(parsed)) {
+          if(confirm(`Found ${parsed.length} memories in file. This will replace your current memories. Continue?`)) {
+            onImport(parsed);
+            alert("Memories imported successfully!");
+          }
+        } else {
+          alert("Invalid file format.");
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Failed to parse JSON file.");
+      }
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -211,6 +257,36 @@ const MemoryManagerModal = ({
             </button>
           </form>
         )}
+
+        {/* Backup / Restore Section */}
+        <div className="mt-6 pt-4 border-t border-[#333] flex justify-between items-center">
+          <div className="text-xs text-[#666]">
+            <p>Data is stored locally in your browser.</p>
+            <p>Use Export/Import to move data between devices.</p>
+          </div>
+          <div className="flex gap-2">
+             <input 
+               type="file" 
+               ref={fileInputRef} 
+               onChange={handleFileChange} 
+               accept="application/json" 
+               className="hidden" 
+             />
+             <button 
+                onClick={handleImportClick}
+                className="px-3 py-1.5 text-xs border border-[#444] text-[#888] hover:border-[#D4AF37] hover:text-[#D4AF37] rounded transition-colors"
+             >
+               Import JSON
+             </button>
+             <button 
+                onClick={handleExport}
+                className="px-3 py-1.5 text-xs border border-[#444] text-[#888] hover:border-[#D4AF37] hover:text-[#D4AF37] rounded transition-colors"
+             >
+               Export JSON
+             </button>
+          </div>
+        </div>
+
       </div>
     </div>
   );
@@ -299,6 +375,10 @@ const ArixChristmasTree = () => {
 
   const handleDeleteMemory = (id: number | string) => {
     setMemories(memories.filter(m => m.id !== id));
+  };
+
+  const handleImportMemories = (importedMemories: Memory[]) => {
+    setMemories(importedMemories);
   };
 
   return (
@@ -396,6 +476,7 @@ const ArixChristmasTree = () => {
         memories={memories}
         onAdd={handleAddMemory}
         onDelete={handleDeleteMemory}
+        onImport={handleImportMemories}
       />
     </div>
   );
