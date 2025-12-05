@@ -1,4 +1,4 @@
-import React, { useState, Suspense, useRef, useCallback } from 'react';
+import React, { useState, Suspense, useRef, useCallback, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, ContactShadows, Stars } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -220,9 +220,28 @@ const ArixChristmasTree = () => {
   const [isTreeShape, setIsTreeShape] = useState(false);
   const [activeMusic, setActiveMusic] = useState<{ url: string, name: string } | null>(null);
   
-  // 🌟 Memory State
-  const [memories, setMemories] = useState<Memory[]>(MEMORIES);
+  // 🌟 Memory State - with LocalStorage Persistence
+  const [memories, setMemories] = useState<Memory[]>(() => {
+    try {
+      const saved = localStorage.getItem('arix_memories');
+      return saved ? JSON.parse(saved) : MEMORIES;
+    } catch (e) {
+      console.warn("Could not load memories:", e);
+      return MEMORIES;
+    }
+  });
+
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Save memories whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('arix_memories', JSON.stringify(memories));
+    } catch (e) {
+      console.error("Storage likely full:", e);
+      // Optional: Handle QuotaExceededError here if needed
+    }
+  }, [memories]);
 
   // 🎮 手势状态
   const [targetRotation, setTargetRotation] = useState(0);
